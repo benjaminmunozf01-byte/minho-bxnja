@@ -1,0 +1,23 @@
+name: Compilar ManhwaShot
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Dar permisos y compilar
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :src:es:manhwashot:assembleDebug
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ManhwaShot-APK
+          path: "**/*.apk"
