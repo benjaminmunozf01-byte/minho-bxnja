@@ -7,7 +7,12 @@ plugins {
 keiyoushi {
     name = "ManhwaShot"
     versionCode = 1
-    contentWarning = ContentWarning.SAFE
+    contentWarning = ContentWarning.NSFW
+    
+    source {
+        lang = "es"
+        baseUrl = "https://manhwashot.lat"
+    }
 }
 
 dependencies {
