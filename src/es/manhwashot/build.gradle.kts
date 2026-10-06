@@ -8,6 +8,7 @@ keiyoushi {
     name = "ManhwaShot"
     versionCode = 1
     contentWarning = ContentWarning.NSFW
+    libVersion = "1.4"
     
     source {
         lang = "es"
