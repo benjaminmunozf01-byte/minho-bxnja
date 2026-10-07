@@ -2,10 +2,13 @@ plugins {
     alias(kei.plugins.multisrc)
 }
 
-kei {
-    name = "ManhwaShot"
+multisrc {
     theme = "mangathemesia"
-    lang = "es"
+}
+
+source {
+    name = "ManhwaShot"
     baseUrl = "https://manhwashot.lat"
+    lang = "es"
     isNsfw = true
 }
