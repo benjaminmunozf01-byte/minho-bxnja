@@ -13,10 +13,10 @@ keiyoushi {
 
     source {
         lang = "es"
-        baseUrl {
-            mirrors(
-                "https://manhwashot.lat",
-            )
-        }
+        baseUrl = "https://manhwashot.lat"
     }
+}
+
+dependencies {
+    implementation(project(":lib-multisrc:madara"))
 }
