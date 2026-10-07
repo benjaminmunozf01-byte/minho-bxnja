@@ -10,8 +10,8 @@ import kotlin.time.Duration.Companion.seconds
 
 @Source
 abstract class ManhwaShot : MadaraNoAjax() {
-    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
-        .addInterceptor { chain ->
+    override fun OkHttpClient.Builder.configureClient() = apply {
+        addInterceptor { chain ->
             val request = chain.request()
 
             val isImageRequest = request.url.toString().substringBefore("?").let {
@@ -38,8 +38,8 @@ abstract class ManhwaShot : MadaraNoAjax() {
 
             return@addInterceptor response
         }
-        .rateLimit(1, 2.seconds)
-        .build()
+        rateLimit(1, 2.seconds)
+    }
 
     override val chapterUrlSelector = "div.mini-letters > a"
 
