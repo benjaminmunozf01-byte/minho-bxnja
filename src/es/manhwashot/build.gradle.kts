@@ -1,14 +1,22 @@
+import io.github.keiyoushi.gradle.api.ContentWarning
+
 plugins {
-    alias(kei.plugins.multisrc)
+    alias(kei.plugins.extension)
 }
 
-multisrc {
-    theme = "mangathemesia"
-}
-
-source {
+keiyoushi {
     name = "ManhwaShot"
-    baseUrl = "https://manhwashot.lat"
-    lang = "es"
-    isNsfw = true
+    versionCode = 1
+    contentWarning = ContentWarning.MIXED
+    libVersion = "1.6"
+    theme = "madara"
+
+    source {
+        lang = "es"
+        baseUrl {
+            mirrors(
+                "https://manhwashot.lat",
+            )
+        }
+    }
 }
