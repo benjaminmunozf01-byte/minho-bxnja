@@ -9,7 +9,7 @@ import okhttp3.ResponseBody.Companion.asResponseBody
 import kotlin.time.Duration.Companion.seconds
 
 @Source
-abstract class ManhwaShot : MadaraNoAjax() {
+class ManhwaShot : MadaraNoAjax() {
     override fun OkHttpClient.Builder.configureClient() = apply {
         addInterceptor { chain ->
             val request = chain.request()
@@ -40,10 +40,4 @@ abstract class ManhwaShot : MadaraNoAjax() {
         }
         rateLimit(1, 2.seconds)
     }
-
-    override val chapterUrlSelector = "div.mini-letters > a"
-
-    override val mangaDetailsSelectorStatus = "div.post-content_item:contains(Estado del comic) > div.summary-content"
-    override val mangaDetailsSelectorDescription = "div.post-content_item:contains(Resumen) div.summary-container"
-    override val pageListParseSelector = "div.page-break img.wp-manga-chapter-img"
 }
