@@ -1,17 +1,11 @@
-import io.github.keiyoushi.gradle.api.ContentWarning
-
 plugins {
-    alias(kei.plugins.extension)
+    alias(kei.plugins.multisrc)
 }
 
-keiyoushi {
+kei {
     name = "ManhwaShot"
-    versionCode = 1
-    contentWarning = ContentWarning.NSFW
-    libVersion = "1.4"
-
-    source {
-        lang = "es"
-        baseUrl = "https://manhwashot.lat"
-    }
+    theme = "mangathemesia"
+    lang = "es"
+    baseUrl = "https://manhwashot.lat"
+    isNsfw = true
 }
