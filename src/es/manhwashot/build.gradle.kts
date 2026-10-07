@@ -6,17 +6,11 @@ plugins {
 
 keiyoushi {
     name = "ManhwaShot"
-    versionCode = 5
+    versionCode = 9
     contentWarning = ContentWarning.MIXED
-    libVersion = "1.6"
-    theme = "madara"
 
     source {
         lang = "es"
         baseUrl = "https://manhwashot.lat"
     }
-}
-
-dependencies {
-    implementation(project(":lib-multisrc:madara"))
 }
