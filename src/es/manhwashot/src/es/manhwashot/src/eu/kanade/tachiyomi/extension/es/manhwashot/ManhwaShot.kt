@@ -9,10 +9,10 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.annotation.Source
 import keiyoushi.network.rateLimit
+import kotlin.time.Duration.Companion.seconds
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import kotlin.time.Duration.Companion.seconds
 
 @Source
 class ManhwaShot : HttpSource() {
