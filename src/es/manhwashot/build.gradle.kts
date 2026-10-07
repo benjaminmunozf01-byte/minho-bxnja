@@ -8,13 +8,7 @@ keiyoushi {
     name = "ManhwaShot"
     versionCode = 1
     contentWarning = ContentWarning.NSFW
-    libVersion = "1.6"
-    theme = "mangathemesia"
-    
-    source {
-        lang = "es"
-        baseUrl = "https://manhwashot.lat"
-    }
+    libVersion = "1.4"
 }
 
 dependencies {
