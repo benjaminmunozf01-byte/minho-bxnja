@@ -9,11 +9,7 @@ import okhttp3.ResponseBody.Companion.asResponseBody
 import kotlin.time.Duration.Companion.seconds
 
 @Source
-class ManhwaShot : MadaraNoAjax() {
-    override val name = "ManhwaShot"
-    override val baseUrl = "https://manhwashot.lat"
-    override val lang = "es"
-
+abstract class ManhwaShot : MadaraNoAjax() {
     override fun OkHttpClient.Builder.configureClient() = apply {
         addInterceptor { chain ->
             val request = chain.request()
