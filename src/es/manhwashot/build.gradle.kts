@@ -9,8 +9,9 @@ keiyoushi {
     versionCode = 1
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
-}
 
-dependencies {
-    implementation(project(":lib-multisrc:mangathemesia"))
+    source {
+        lang = "es"
+        baseUrl = "https://manhwashot.lat"
+    }
 }
