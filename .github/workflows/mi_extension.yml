@@ -12,12 +12,9 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-      - name: Formatear código automáticamente
-        run: |
-          chmod +x ./gradlew
-          ./gradlew spotlessApply
       - name: Compilar extensión
         run: |
+          chmod +x ./gradlew
           ./gradlew :src:es:manhwashot:assembleDebug
       - name: Subir APK
         uses: actions/upload-artifact@v4
