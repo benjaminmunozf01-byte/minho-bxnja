@@ -6,18 +6,21 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
-import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
 import keiyoushi.network.get
 import keiyoushi.source.KeiSource
 import kotlinx.serialization.json.JsonElement
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Response
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 @Source
 abstract class ManhwaShot : KeiSource() {
+
+    private fun Response.toDocument(): Document = use { Jsoup.parse(it.body.string(), it.request.url.toString()) }
 
     // ---------- Listados (selectores SIN verificar: falta el HTML de /explorar/) ----------
     override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries("$baseUrl/explorar/?page=$page")
@@ -33,7 +36,7 @@ abstract class ManhwaShot : KeiSource() {
     }
 
     private suspend fun fetchSeries(url: String): MangasPage {
-        val document = client.get(url).asJsoup()
+        val document = client.get(url).toDocument()
         val mangas = document.select("a.s-card").map { it.toSManga() }
         return MangasPage(mangas, false) // paginación pendiente
     }
@@ -51,7 +54,7 @@ abstract class ManhwaShot : KeiSource() {
         if (url.host != baseUrl.toHttpUrl().host) return null
         val slug = url.pathSegments.lastOrNull { it.isNotEmpty() } ?: return null
         val path = "/manga/$slug/"
-        val document = client.get(baseUrl + path).asJsoup()
+        val document = client.get(baseUrl + path).toDocument()
         return parseDetails(document).apply { this.url = path }
     }
 
@@ -61,7 +64,7 @@ abstract class ManhwaShot : KeiSource() {
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val document = client.get(baseUrl + manga.url).asJsoup()
+        val document = client.get(baseUrl + manga.url).toDocument()
         return SMangaUpdate(
             parseDetails(document).apply { url = manga.url },
             parseChapters(document),
