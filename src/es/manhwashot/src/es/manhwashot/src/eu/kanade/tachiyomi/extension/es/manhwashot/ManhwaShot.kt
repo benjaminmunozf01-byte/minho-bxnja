@@ -22,29 +22,30 @@ abstract class ManhwaShot : KeiSource() {
 
     private fun Response.toDocument(): Document = use { Jsoup.parse(it.body.string(), it.request.url.toString()) }
 
-    // ---------- Listados (selectores SIN verificar: falta el HTML de /explorar/) ----------
-    override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries("$baseUrl/explorar/?page=$page")
+    // ---------- Listados (verificado con el HTML de /explorar/) ----------
+    override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page, null)
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries("$baseUrl/explorar/?page=$page")
+    override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries(page, null)
 
-    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
-        val url = "$baseUrl/explorar/".toHttpUrl().newBuilder()
-            .addQueryParameter("q", query)
-            .addQueryParameter("page", page.toString())
-            .build()
-        return fetchSeries(url.toString())
-    }
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage = fetchSeries(page, query.trim().ifEmpty { null })
 
-    private suspend fun fetchSeries(url: String): MangasPage {
+    private suspend fun fetchSeries(page: Int, query: String?): MangasPage {
+        val path = if (page <= 1) "/explorar/" else "/explorar/page/$page/"
+        val url = (baseUrl + path).toHttpUrl().newBuilder().apply {
+            if (query != null) addQueryParameter("q", query)
+        }.build()
+
         val document = client.get(url).toDocument()
-        val mangas = document.select("a.s-card").map { it.toSManga() }
-        return MangasPage(mangas, false) // paginación pendiente
+        val mangas = document.select("div.series-grid > div.s-card").map { it.toSManga() }
+        val hasNextPage = document.selectFirst("a.pager-btn:contains(Siguiente)") != null
+        return MangasPage(mangas, hasNextPage)
     }
 
     private fun Element.toSManga() = SManga.create().apply {
-        url = absUrl("href").removePrefix(baseUrl)
-        title = selectFirst(".s-card-title")!!.text()
-        thumbnail_url = selectFirst("img")?.absUrl("src")
+        val link = selectFirst("a.s-card-title")!!
+        url = link.absUrl("href").removePrefix(baseUrl)
+        title = link.text()
+        thumbnail_url = selectFirst(".s-card-img img")?.absUrl("src")
     }
 
     // ---------- Detalles y capítulos (verificado) ----------
@@ -102,14 +103,13 @@ abstract class ManhwaShot : KeiSource() {
         }
     }
 
-    // ---------- Páginas del capítulo (verificado con el HTML de capitulo-37) ----------
+    // ---------- Páginas del capítulo (verificado) ----------
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val document = client.get(baseUrl + chapter.url).toDocument()
 
         val images = document.select("img[src*=\"/WP-manga/data/\"]")
             .map { it.absUrl("src") }
             .ifEmpty {
-                // Respaldo: buscar las URLs en cualquier parte del HTML (payload de Next.js)
                 IMAGE_REGEX.findAll(document.html()).map { it.value }.toList()
             }
             .distinct()
