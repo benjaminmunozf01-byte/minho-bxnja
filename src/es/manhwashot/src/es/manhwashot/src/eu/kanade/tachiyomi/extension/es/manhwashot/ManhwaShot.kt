@@ -47,7 +47,7 @@ abstract class ManhwaShot : KeiSource() {
         thumbnail_url = selectFirst("img")?.absUrl("src")
     }
 
-    // ---------- Detalles y capítulos (verificado con tu HTML) ----------
+    // ---------- Detalles y capítulos (verificado) ----------
     override fun getMangaUrl(manga: SManga): String = baseUrl + manga.url
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
@@ -102,13 +102,26 @@ abstract class ManhwaShot : KeiSource() {
         }
     }
 
-    // ---------- Páginas (PENDIENTE: necesito el HTML de un capítulo) ----------
-    override suspend fun getPageList(chapter: SChapter): List<Page> = throw UnsupportedOperationException("Pendiente")
+    // ---------- Páginas del capítulo (verificado con el HTML de capitulo-37) ----------
+    override suspend fun getPageList(chapter: SChapter): List<Page> {
+        val document = client.get(baseUrl + chapter.url).toDocument()
+
+        val images = document.select("img[src*=\"/WP-manga/data/\"]")
+            .map { it.absUrl("src") }
+            .ifEmpty {
+                // Respaldo: buscar las URLs en cualquier parte del HTML (payload de Next.js)
+                IMAGE_REGEX.findAll(document.html()).map { it.value }.toList()
+            }
+            .distinct()
+
+        return images.mapIndexed { i, url -> Page(i, imageUrl = url) }
+    }
 
     override fun getFilterList(data: JsonElement?): FilterList = FilterList()
 
     companion object {
         private val CHAPTER_REGEX = Regex("""capitulo-(\d+(?:\.\d+)?)""")
         private val DATE_REGEX = Regex("""\\"(\d+)\\":(\d{9,10})""")
+        private val IMAGE_REGEX = Regex("""https://img\.manhwashot\.lat/img/WP-manga/data/[^"\\\s]+\.(?:webp|jpg|jpeg|png)""")
     }
 }
