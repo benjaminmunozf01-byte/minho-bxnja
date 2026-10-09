@@ -31,13 +31,14 @@ jobs:
         run: |
           mkdir -p repo_build/apk
           
+          # Copiar el APK compilado a la carpeta apk/ dentro del directorio de publicación
           find . -name "*.apk" -exec cp {} repo_build/apk/manhwashot.apk \;
           
           GRADLE_FILE=$(find . -name "build.gradle.kts" | head -n 1)
           CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' $GRADLE_FILE || echo "10")
           VERSION=$(grep -oP 'libVersion\s*=\s*"\K[^"]+' $GRADLE_FILE || echo "1.6")
           
-          # Generar el index.min.json
+          # Generar el index.min.json apuntando a la ruta correcta del APK
           cat <<EOF > repo_build/index.min.json
           [
             {
@@ -55,7 +56,7 @@ jobs:
           ]
           EOF
           
-          # Generar el repo.json solucionando el error del fingerprint
+          # Generar el repo.json con el fingerprint requerido por Mihon
           cat <<EOF > repo_build/repo.json
           {
             "meta": {
@@ -74,4 +75,4 @@ jobs:
           publish_branch: repo
           publish_dir: ./repo_build
           force_orphan: true
-          commit_message: "Actualizar repositorio de extensiones"
+          commit_message: "Actualizar repositorio y APK"
