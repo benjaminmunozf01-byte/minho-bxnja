@@ -27,46 +27,63 @@ jobs:
           ./gradlew spotlessApply
           ./gradlew :src:es:manhwashot:assembleDebug
 
-      - name: Preparar Repositorio y JSONs
+      - name: Preparar repositorio
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KS_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASS }}
         run: |
-          mkdir -p repo_build/apk
-          
-          # Copiar el APK compilado a la carpeta apk/ dentro del directorio de publicación
-          find . -name "*.apk" -exec cp {} repo_build/apk/manhwashot.apk \;
-          
-          GRADLE_FILE=$(find . -name "build.gradle.kts" | head -n 1)
-          CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' $GRADLE_FILE || echo "10")
-          VERSION=$(grep -oP 'libVersion\s*=\s*"\K[^"]+' $GRADLE_FILE || echo "1.6")
-          
-          # Generar el index.min.json apuntando a la ruta correcta del APK
-          cat <<EOF > repo_build/index.min.json
-          [
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          SRC=$(ls src/es/manhwashot/build/outputs/apk/debug/*.apk | head -n 1)
+          mkdir -p repo_build/apk repo_build/icon
+          APK=repo_build/apk/manhwashot.apk
+
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks.jks"
+            "$BT/apksigner" sign --ks "$RUNNER_TEMP/ks.jks" \
+              --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
+              --out "$APK" "$SRC"
+          else
+            echo "Sin llave propia: usando firma de depuración (solo para pruebas)"
+            cp "$SRC" "$APK"
+          fi
+
+          INFO=$("$BT/aapt2" dump badging "$APK" | grep "^package:")
+          PKG=$(echo "$INFO" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          CODE=$(echo "$INFO" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+          VERSION=$(echo "$INFO" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          FP=$("$BT/apksigner" verify --print-certs "$APK" | grep -m1 "SHA-256 digest" | awk '{print $NF}')
+
+          echo "pkg=$PKG code=$CODE version=$VERSION fp=$FP"
+
+          jq -n --arg pkg "$PKG" --arg ver "$VERSION" --argjson code "$CODE" '[
             {
-              "name": "ManhwaShot",
-              "pkg": "eu.kanade.tachiyomi.extension.es.manhwashot",
-              "apk": "apk/manhwashot.apk",
-              "lang": "es",
-              "code": $CODE,
-              "version": "$VERSION",
-              "nsfw": 0,
-              "hasReadme": 0,
-              "hasChangelog": 0,
-              "sources": []
+              name: "ManhwaShot",
+              pkg: $pkg,
+              apk: "manhwashot.apk",
+              lang: "es",
+              code: $code,
+              version: $ver,
+              nsfw: 1,
+              hasReadme: 0,
+              hasChangelog: 0,
+              sources: []
             }
-          ]
-          EOF
-          
-          # Generar el repo.json con el fingerprint requerido por Mihon
-          cat <<EOF > repo_build/repo.json
-          {
-            "meta": {
-              "name": "Repo de Benja",
-              "shortName": "ManhwaShot Repo",
-              "website": "https://github.com/benjaminmunozf01-byte/minho-bxnja",
-              "signingKeyFingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
+          ]' > repo_build/index.min.json
+
+          jq -n --arg fp "$FP" '{
+            meta: {
+              name: "Repo de Benja",
+              shortName: "ManhwaShot Repo",
+              website: "https://github.com/benjaminmunozf01-byte/minho-bxnja",
+              signingKeyFingerprint: $fp
             }
-          }
-          EOF
+          }' > repo_build/repo.json
+
+          ICON=src/es/manhwashot/res/mipmap-xxxhdpi/ic_launcher.png
+          if [ -f "$ICON" ]; then cp "$ICON" "repo_build/icon/$PKG.png"; fi
 
       - name: Publicar en la rama 'repo'
         uses: peaceiris/actions-gh-pages@v3
