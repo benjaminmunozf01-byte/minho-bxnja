@@ -37,11 +37,11 @@ abstract class ManhwaShot : KeiSource() {
 
         val document = client.get(url).toDocument()
         val mangas = document.select("div.series-grid > div.s-card").map { it.toSManga() }
-        
+
         // Mejoramos el validador de paginación para que no falle al bajar
         val hasNextPage = document.selectFirst(".pager a[href*=/page/${page + 1}]") != null ||
             document.select("a.pager-btn").any { it.text().contains("Siguiente", true) }
-            
+
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -99,7 +99,7 @@ abstract class ManhwaShot : KeiSource() {
             }
 
         val block = nextJsPayload.substringAfter("\\\"dates\\\":{", "").substringBefore("}")
-        
+
         // Usamos Float como key del map para emparejar bien los capítulos que traen decimales
         val dates = DATE_REGEX.findAll(block).associate {
             it.groupValues[1].toFloat() to it.groupValues[2].toLong() * 1000
@@ -133,6 +133,7 @@ abstract class ManhwaShot : KeiSource() {
 
     companion object {
         private val CHAPTER_REGEX = Regex("""capitulo-(\d+(?:\.\d+)?)""")
+
         // Regex modificada para admitir tanto capítulos enteros como decimales (Ej. 208.5)
         private val DATE_REGEX = Regex("""\\"(\d+(?:\.\d+)?)\\":(\d{9,10})""")
         private val IMAGE_REGEX = Regex("""https://img\.manhwashot\.lat/img/WP-manga/data/[^"\\\s]+\.(?:webp|jpg|jpeg|png)""")
