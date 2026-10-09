@@ -5,7 +5,6 @@ on:
     branches:
       - main
 
-# Esto le da permiso al bot de GitHub para crear la rama "repo" automáticamente
 permissions:
   contents: write
 
@@ -25,22 +24,20 @@ jobs:
       - name: Compilar extensión
         run: |
           chmod +x ./gradlew
+          ./gradlew spotlessApply
           ./gradlew :src:es:manhwashot:assembleDebug
 
-      - name: Preparar Repositorio y JSON
+      - name: Preparar Repositorio y JSONs
         run: |
-          # 1. Crear las carpetas necesarias
           mkdir -p repo_build/apk
           
-          # 2. Buscar el APK generado y copiarlo
           find . -name "*.apk" -exec cp {} repo_build/apk/manhwashot.apk \;
           
-          # 3. Extraer el versionCode y libVersion de tu archivo build.gradle.kts
           GRADLE_FILE=$(find . -name "build.gradle.kts" | head -n 1)
           CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' $GRADLE_FILE || echo "10")
           VERSION=$(grep -oP 'libVersion\s*=\s*"\K[^"]+' $GRADLE_FILE || echo "1.6")
           
-          # 4. Generar el archivo index.min.json que pide Mihon
+          # Generar el index.min.json
           cat <<EOF > repo_build/index.min.json
           [
             {
@@ -56,6 +53,17 @@ jobs:
               "sources": []
             }
           ]
+          EOF
+          
+          # Generar el repo.json que le faltaba a Mihon
+          cat <<EOF > repo_build/repo.json
+          {
+            "meta": {
+              "name": "Repo de Benja",
+              "shortName": "ManhwaShot Repo",
+              "website": "https://github.com/benjaminmunozf01-byte/minho-bxnja"
+            }
+          }
           EOF
 
       - name: Publicar en la rama 'repo'
