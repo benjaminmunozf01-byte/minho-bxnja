@@ -1,0 +1,68 @@
+name: Compilar y Publicar Repositorio
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+# Esto le da permiso al bot de GitHub para crear la rama "repo" automáticamente
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Compilar extensión
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :src:es:manhwashot:assembleDebug
+
+      - name: Preparar Repositorio y JSON
+        run: |
+          # 1. Crear las carpetas necesarias
+          mkdir -p repo_build/apk
+          
+          # 2. Buscar el APK generado y copiarlo
+          find . -name "*.apk" -exec cp {} repo_build/apk/manhwashot.apk \;
+          
+          # 3. Extraer el versionCode y libVersion de tu archivo build.gradle.kts
+          GRADLE_FILE=$(find . -name "build.gradle.kts" | head -n 1)
+          CODE=$(grep -oP 'versionCode\s*=\s*\K\d+' $GRADLE_FILE || echo "10")
+          VERSION=$(grep -oP 'libVersion\s*=\s*"\K[^"]+' $GRADLE_FILE || echo "1.6")
+          
+          # 4. Generar el archivo index.min.json que pide Mihon
+          cat <<EOF > repo_build/index.min.json
+          [
+            {
+              "name": "ManhwaShot",
+              "pkg": "eu.kanade.tachiyomi.extension.es.manhwashot",
+              "apk": "apk/manhwashot.apk",
+              "lang": "es",
+              "code": $CODE,
+              "version": "$VERSION",
+              "nsfw": 0,
+              "hasReadme": 0,
+              "hasChangelog": 0,
+              "sources": []
+            }
+          ]
+          EOF
+
+      - name: Publicar en la rama 'repo'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: repo
+          publish_dir: ./repo_build
+          force_orphan: true
+          commit_message: "Actualizar repositorio de extensiones"
