@@ -22,7 +22,7 @@ abstract class ManhwaShot : KeiSource() {
 
     private fun Response.toDocument(): Document = use { Jsoup.parse(it.body.string(), it.request.url.toString()) }
 
-    // ---------- Listados (verificado con el HTML de /explorar/) ----------
+    // ---------- Listados ----------
     override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page, null)
 
     override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries(page, null)
@@ -37,7 +37,11 @@ abstract class ManhwaShot : KeiSource() {
 
         val document = client.get(url).toDocument()
         val mangas = document.select("div.series-grid > div.s-card").map { it.toSManga() }
-        val hasNextPage = document.selectFirst("a.pager-btn:contains(Siguiente)") != null
+        
+        // Mejoramos el validador de paginación para que no falle al bajar
+        val hasNextPage = document.selectFirst(".pager a[href*=/page/${page + 1}]") != null ||
+            document.select("a.pager-btn").any { it.text().contains("Siguiente", true) }
+            
         return MangasPage(mangas, hasNextPage)
     }
 
@@ -48,7 +52,7 @@ abstract class ManhwaShot : KeiSource() {
         thumbnail_url = selectFirst(".s-card-img img")?.absUrl("src")
     }
 
-    // ---------- Detalles y capítulos (verificado) ----------
+    // ---------- Detalles y capítulos ----------
     override fun getMangaUrl(manga: SManga): String = baseUrl + manga.url
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
@@ -86,11 +90,19 @@ abstract class ManhwaShot : KeiSource() {
     }
 
     private fun parseChapters(document: Document): List<SChapter> {
-        // Las fechas vienen en el payload de Next.js: \"dates\":{\"1\":1772812744,...} (segundos)
-        val scripts = document.select("script").joinToString("\n") { it.data() }
-        val block = scripts.substringAfter("\\\"dates\\\":{", "").substringBefore("}")
+        // Concatenamos todos los fragmentos del payload de Next.js para que no se corten las fechas
+        val nextJsPayload = document.select("script")
+            .map { it.data() }
+            .filter { it.contains("__next_f.push") }
+            .joinToString("") {
+                it.substringAfter("push([1,\"", "").substringBeforeLast("\"])", "")
+            }
+
+        val block = nextJsPayload.substringAfter("\\\"dates\\\":{", "").substringBefore("}")
+        
+        // Usamos Float como key del map para emparejar bien los capítulos que traen decimales
         val dates = DATE_REGEX.findAll(block).associate {
-            it.groupValues[1].toInt() to it.groupValues[2].toLong() * 1000
+            it.groupValues[1].toFloat() to it.groupValues[2].toLong() * 1000
         }
 
         return document.select("div.chapters-grid > a.ch-row").map { el ->
@@ -98,12 +110,12 @@ abstract class ManhwaShot : KeiSource() {
                 setUrlWithoutDomain(el.absUrl("href"))
                 name = el.selectFirst(".ch-num")!!.text()
                 chapter_number = CHAPTER_REGEX.find(url)?.groupValues?.get(1)?.toFloatOrNull() ?: -1f
-                date_upload = dates[chapter_number.toInt()] ?: 0L
+                date_upload = dates[chapter_number] ?: 0L
             }
         }
     }
 
-    // ---------- Páginas del capítulo (verificado) ----------
+    // ---------- Páginas del capítulo ----------
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val document = client.get(baseUrl + chapter.url).toDocument()
 
@@ -121,7 +133,8 @@ abstract class ManhwaShot : KeiSource() {
 
     companion object {
         private val CHAPTER_REGEX = Regex("""capitulo-(\d+(?:\.\d+)?)""")
-        private val DATE_REGEX = Regex("""\\"(\d+)\\":(\d{9,10})""")
+        // Regex modificada para admitir tanto capítulos enteros como decimales (Ej. 208.5)
+        private val DATE_REGEX = Regex("""\\"(\d+(?:\.\d+)?)\\":(\d{9,10})""")
         private val IMAGE_REGEX = Regex("""https://img\.manhwashot\.lat/img/WP-manga/data/[^"\\\s]+\.(?:webp|jpg|jpeg|png)""")
     }
 }
