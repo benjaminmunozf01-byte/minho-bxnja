@@ -55,13 +55,14 @@ jobs:
           ]
           EOF
           
-          # Generar el repo.json que le faltaba a Mihon
+          # Generar el repo.json solucionando el error del fingerprint
           cat <<EOF > repo_build/repo.json
           {
             "meta": {
               "name": "Repo de Benja",
               "shortName": "ManhwaShot Repo",
-              "website": "https://github.com/benjaminmunozf01-byte/minho-bxnja"
+              "website": "https://github.com/benjaminmunozf01-byte/minho-bxnja",
+              "signingKeyFingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
             }
           }
           EOF
