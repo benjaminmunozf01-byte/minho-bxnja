@@ -23,24 +23,40 @@ abstract class ManhwaShot : KeiSource() {
     private fun Response.toDocument(): Document = use { Jsoup.parse(it.body.string(), it.request.url.toString()) }
 
     // ---------- Listados ----------
-    override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page, null)
+    override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page)
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries(page, null)
+    override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries(page)
 
-    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage = fetchSeries(page, query.trim().ifEmpty { null })
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
+        var section = ""
+        var genre = ""
+        filters.forEach { filter ->
+            when (filter) {
+                is SectionFilter -> section = filter.toUriPart()
+                is GenreFilter -> genre = filter.toUriPart()
+                else -> {}
+            }
+        }
+        return fetchSeries(page, query.trim().ifEmpty { null }, section, genre)
+    }
 
-    private suspend fun fetchSeries(page: Int, query: String?): MangasPage {
-        val path = if (page <= 1) "/explorar/" else "/explorar/page/$page/"
+    private suspend fun fetchSeries(
+        page: Int,
+        query: String? = null,
+        section: String = "",
+        genre: String = "",
+    ): MangasPage {
+        // /explorar/[seccion/][page/N/]?q=...&genero=...
+        val base = if (section.isEmpty()) "/explorar" else "/explorar/$section"
+        val path = if (page <= 1) "$base/" else "$base/page/$page/"
         val url = (baseUrl + path).toHttpUrl().newBuilder().apply {
             if (query != null) addQueryParameter("q", query)
+            if (genre.isNotEmpty()) addQueryParameter("genero", genre)
         }.build()
 
         val document = client.get(url).toDocument()
         val mangas = document.select("div.series-grid > div.s-card").map { it.toSManga() }
-
-        // Mejoramos el validador de paginación para que no falle al bajar
-        val hasNextPage = document.selectFirst(".pager a[href*=/page/${page + 1}]") != null ||
-            document.select("a.pager-btn").any { it.text().contains("Siguiente", true) }
+        val hasNextPage = document.select("a.pager-btn").any { it.text().contains("Siguiente", true) }
 
         return MangasPage(mangas, hasNextPage)
     }
@@ -100,7 +116,7 @@ abstract class ManhwaShot : KeiSource() {
 
         val block = nextJsPayload.substringAfter("\\\"dates\\\":{", "").substringBefore("}")
 
-        // Usamos Float como key del map para emparejar bien los capítulos que traen decimales
+        // Float como clave para emparejar bien los capítulos con decimales
         val dates = DATE_REGEX.findAll(block).associate {
             it.groupValues[1].toFloat() to it.groupValues[2].toLong() * 1000
         }
@@ -129,12 +145,16 @@ abstract class ManhwaShot : KeiSource() {
         return images.mapIndexed { i, url -> Page(i, imageUrl = url) }
     }
 
-    override fun getFilterList(data: JsonElement?): FilterList = FilterList()
+    // ---------- Filtros ----------
+    override fun getFilterList(data: JsonElement?): FilterList = FilterList(
+        SectionFilter(),
+        GenreFilter(),
+    )
 
     companion object {
         private val CHAPTER_REGEX = Regex("""capitulo-(\d+(?:\.\d+)?)""")
 
-        // Regex modificada para admitir tanto capítulos enteros como decimales (Ej. 208.5)
+        // Admite capítulos enteros y decimales (Ej. 208.5)
         private val DATE_REGEX = Regex("""\\"(\d+(?:\.\d+)?)\\":(\d{9,10})""")
         private val IMAGE_REGEX = Regex("""https://img\.manhwashot\.lat/img/WP-manga/data/[^"\\\s]+\.(?:webp|jpg|jpeg|png)""")
     }
