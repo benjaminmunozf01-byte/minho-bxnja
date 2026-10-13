@@ -22,7 +22,6 @@ abstract class ManhwaShot : KeiSource() {
 
     private fun Response.toDocument(): Document = use { Jsoup.parse(it.body.string(), it.request.url.toString()) }
 
-    // ---------- Listados ----------
     override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page)
 
     override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries(page)
@@ -46,7 +45,6 @@ abstract class ManhwaShot : KeiSource() {
         section: String = "",
         genre: String = "",
     ): MangasPage {
-        // /explorar/[seccion/][page/N/]?q=...&genero=...
         val base = if (section.isEmpty()) "/explorar" else "/explorar/$section"
         val path = if (page <= 1) "$base/" else "$base/page/$page/"
         val url = (baseUrl + path).toHttpUrl().newBuilder().apply {
@@ -68,7 +66,6 @@ abstract class ManhwaShot : KeiSource() {
         thumbnail_url = selectFirst(".s-card-img img")?.absUrl("src")
     }
 
-    // ---------- Detalles y capítulos ----------
     override fun getMangaUrl(manga: SManga): String = baseUrl + manga.url
 
     override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
@@ -106,7 +103,6 @@ abstract class ManhwaShot : KeiSource() {
     }
 
     private fun parseChapters(document: Document): List<SChapter> {
-        // Concatenamos todos los fragmentos del payload de Next.js para que no se corten las fechas
         val nextJsPayload = document.select("script")
             .map { it.data() }
             .filter { it.contains("__next_f.push") }
@@ -116,7 +112,6 @@ abstract class ManhwaShot : KeiSource() {
 
         val block = nextJsPayload.substringAfter("\\\"dates\\\":{", "").substringBefore("}")
 
-        // Float como clave para emparejar bien los capítulos con decimales
         val dates = DATE_REGEX.findAll(block).associate {
             it.groupValues[1].toFloat() to it.groupValues[2].toLong() * 1000
         }
@@ -131,7 +126,6 @@ abstract class ManhwaShot : KeiSource() {
         }
     }
 
-    // ---------- Páginas del capítulo ----------
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val document = client.get(baseUrl + chapter.url).toDocument()
 
@@ -145,7 +139,6 @@ abstract class ManhwaShot : KeiSource() {
         return images.mapIndexed { i, url -> Page(i, imageUrl = url) }
     }
 
-    // ---------- Filtros ----------
     override fun getFilterList(data: JsonElement?): FilterList = FilterList(
         SectionFilter(),
         GenreFilter(),
@@ -153,8 +146,6 @@ abstract class ManhwaShot : KeiSource() {
 
     companion object {
         private val CHAPTER_REGEX = Regex("""capitulo-(\d+(?:\.\d+)?)""")
-
-        // Admite capítulos enteros y decimales (Ej. 208.5)
         private val DATE_REGEX = Regex("""\\"(\d+(?:\.\d+)?)\\":(\d{9,10})""")
         private val IMAGE_REGEX = Regex("""https://img\.manhwashot\.lat/img/WP-manga/data/[^"\\\s]+\.(?:webp|jpg|jpeg|png)""")
     }
