@@ -21,69 +21,73 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Compilar extensión
+      - name: Compilar extensiones
         run: |
           chmod +x ./gradlew
           ./gradlew spotlessApply
+          # Compilamos ambas extensiones por separado
           ./gradlew :src:es:manhwashot:assembleDebug
+          ./gradlew :src:es:kumanga:assembleDebug
 
-      - name: Preparar repositorio
-        env:
-          KS_B64: ${{ secrets.KEYSTORE_B64 }}
-          KS_PASS: ${{ secrets.KS_PASS }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.KEY_PASS }}
+      - name: Preparar Repositorio y JSONs
         run: |
-          set -e
-          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
-          SRC=$(ls src/es/manhwashot/build/outputs/apk/debug/*.apk | head -n 1)
-          mkdir -p repo_build/apk repo_build/icon
-          APK=repo_build/apk/manhwashot.apk
-
-          if [ -n "$KS_B64" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks.jks"
-            "$BT/apksigner" sign --ks "$RUNNER_TEMP/ks.jks" \
-              --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
-              --out "$APK" "$SRC"
-          else
-            echo "Sin llave propia: usando firma de depuración (solo para pruebas)"
-            cp "$SRC" "$APK"
-          fi
-
-          INFO=$("$BT/aapt2" dump badging "$APK" | grep "^package:")
-          PKG=$(echo "$INFO" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
-          CODE=$(echo "$INFO" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
-          VERSION=$(echo "$INFO" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
-          FP=$("$BT/apksigner" verify --print-certs "$APK" | grep -m1 "SHA-256 digest" | awk '{print $NF}')
-
-          echo "pkg=$PKG code=$CODE version=$VERSION fp=$FP"
-
-          jq -n --arg pkg "$PKG" --arg ver "$VERSION" --argjson code "$CODE" '[
+          mkdir -p repo_build/apk
+          
+          # 1. Buscar y copiar cada APK a su archivo correspondiente sin que se sobreescriban
+          find src/es/manhwashot -name "*.apk" -exec cp {} repo_build/apk/manhwashot.apk \;
+          find src/es/kumanga -name "*.apk" -exec cp {} repo_build/apk/kumanga.apk \;
+          
+          # 2. Leer las versiones dinámicamente para ManhwaShot
+          GRADLE_MS=$(find src/es/manhwashot -name "build.gradle*" | head -n 1)
+          CODE_MS=$(grep -oP 'versionCode\s*=\s*\K\d+' $GRADLE_MS || echo "10")
+          VERS_MS=$(grep -oP 'libVersion\s*=\s*"\K[^"]+' $GRADLE_MS || echo "1.6")
+          
+          # 3. Leer las versiones dinámicamente para Kumanga
+          GRADLE_KU=$(find src/es/kumanga -name "build.gradle*" | head -n 1)
+          CODE_KU=$(grep -oP 'versionCode\s*=\s*\K\d+' $GRADLE_KU || echo "1")
+          VERS_KU=$(grep -oP 'libVersion\s*=\s*"\K[^"]+' $GRADLE_KU || echo "1.0")
+          
+          # 4. Generar el index.min.json incluyendo ambas extensiones en la lista
+          cat <<EOF > repo_build/index.min.json
+          [
             {
-              name: "ManhwaShot",
-              pkg: $pkg,
-              apk: "manhwashot.apk",
-              lang: "es",
-              code: $code,
-              version: $ver,
-              nsfw: 1,
-              hasReadme: 0,
-              hasChangelog: 0,
-              sources: []
+              "name": "ManhwaShot",
+              "pkg": "eu.kanade.tachiyomi.extension.es.manhwashot",
+              "apk": "apk/manhwashot.apk",
+              "lang": "es",
+              "code": $CODE_MS,
+              "version": "$VERS_MS",
+              "nsfw": 0,
+              "hasReadme": 0,
+              "hasChangelog": 0,
+              "sources": []
+            },
+            {
+              "name": "Kumanga",
+              "pkg": "eu.kanade.tachiyomi.extension.es.kumanga",
+              "apk": "apk/kumanga.apk",
+              "lang": "es",
+              "code": $CODE_KU,
+              "version": "$VERS_KU",
+              "nsfw": 0,
+              "hasReadme": 0,
+              "hasChangelog": 0,
+              "sources": []
             }
-          ]' > repo_build/index.min.json
-
-          jq -n --arg fp "$FP" '{
-            meta: {
-              name: "Repo de Bxnja",
-              shortName: "Bxnja Repo",
-              website: "https://github.com/benjaminmunozf01-byte/minho-bxnja",
-              signingKeyFingerprint: $fp
+          ]
+          EOF
+          
+          # 5. Generar el repo.json (se mantiene igual)
+          cat <<EOF > repo_build/repo.json
+          {
+            "meta": {
+              "name": "Repo de Benja",
+              "shortName": "Benja Repo",
+              "website": "https://github.com/benjaminmunozf01-byte/minho-bxnja",
+              "signingKeyFingerprint": "0000000000000000000000000000000000000000000000000000000000000000"
             }
-          }' > repo_build/repo.json
-
-          ICON=src/es/manhwashot/res/mipmap-xxxhdpi/ic_launcher.png
-          if [ -f "$ICON" ]; then cp "$ICON" "repo_build/icon/$PKG.png"; fi
+          }
+          EOF
 
       - name: Publicar en la rama 'repo'
         uses: peaceiris/actions-gh-pages@v3
@@ -92,4 +96,4 @@ jobs:
           publish_branch: repo
           publish_dir: ./repo_build
           force_orphan: true
-          commit_message: "Actualizar repositorio y APK"
+          commit_message: "Actualizar repositorio: ManhwaShot y Kumanga"
