@@ -60,10 +60,16 @@ abstract class ManhwaShot : KeiSource() {
             if (genre.isNotEmpty()) addQueryParameter("genero", genre)
         }.build()
 
-        val document = client.get(url).toDocument()
+        var document = client.get(url).toDocument()
+        if (document.selectFirst("div.series-grid") == null) {
+            // Posible respuesta en caché sin series: se reintenta una vez con un parámetro extra
+            val retryUrl = url.newBuilder().addQueryParameter("_", System.currentTimeMillis().toString()).build()
+            document = client.get(retryUrl).toDocument()
+        }
         if (document.selectFirst("div.series-grid") == null) {
             // La web devolvió otra cosa (bloqueo, error, página distinta): mostrarlo en vez de "sin resultados"
-            throw Exception("Respuesta inesperada: \"${document.title()}\" - ${document.text().take(150)}")
+            val main = document.selectFirst("main") ?: document.body()
+            throw Exception("Respuesta inesperada (${document.html().length} bytes): ${main.text().take(200)}")
         }
         val mangas = document.select("div.series-grid > div.s-card").map { it.toSManga() }
         val hasNextPage = document.select("a.pager-btn").any { it.text().contains("Siguiente", true) }
