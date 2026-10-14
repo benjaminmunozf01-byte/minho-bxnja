@@ -25,9 +25,12 @@ abstract class ManhwaShot : KeiSource() {
     // Limita las peticiones al CDN de imágenes para evitar descargas cortadas a medias
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(permits = 1) { it.host == "img.manhwashot.lat" }
 
-    private fun Response.toDocument(): Document = use { Jsoup.parse(it.body.string(), it.request.url.toString()) }
+    private fun Response.toDocument(): Document = use {
+        if (!it.isSuccessful) throw Exception("HTTP ${it.code} al cargar ${it.request.url}")
+        Jsoup.parse(it.body.string(), it.request.url.toString())
+    }
 
-    override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page)
+    override suspend fun getPopularManga(page: Int): MangasPage = fetchSeries(page, genre = POPULAR_GENRE)
 
     override suspend fun getLatestUpdates(page: Int): MangasPage = fetchSeries(page)
 
@@ -58,6 +61,10 @@ abstract class ManhwaShot : KeiSource() {
         }.build()
 
         val document = client.get(url).toDocument()
+        if (document.selectFirst("div.series-grid") == null) {
+            // La web devolvió otra cosa (bloqueo, error, página distinta): mostrarlo en vez de "sin resultados"
+            throw Exception("Respuesta inesperada: \"${document.title()}\" - ${document.text().take(150)}")
+        }
         val mangas = document.select("div.series-grid > div.s-card").map { it.toSManga() }
         val hasNextPage = document.select("a.pager-btn").any { it.text().contains("Siguiente", true) }
 
@@ -150,6 +157,8 @@ abstract class ManhwaShot : KeiSource() {
     )
 
     companion object {
+        // Valor ya codificado; OkHttp lo convierte en genero=nobl%25f0%259f%2592%258c
+        private const val POPULAR_GENRE = "nobl%f0%9f%92%8c"
         private val CHAPTER_REGEX = Regex("""capitulo-(\d+(?:\.\d+)?)""")
         private val DATE_REGEX = Regex("""\\"(\d+(?:\.\d+)?)\\":(\d{9,10})""")
         private val IMAGE_REGEX = Regex("""https://img\.manhwashot\.lat/img/WP-manga/data/[^"\\\s]+\.(?:webp|jpg|jpeg|png)""")
