@@ -1,0 +1,116 @@
+name: Compilar y Publicar Repositorio
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Configurar Gradle (caché)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar extensiones
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :src:es:manhwashot:spotlessApply :src:es:kumanga:spotlessApply
+          ./gradlew :src:es:manhwashot:assembleDebug :src:es:kumanga:assembleDebug
+
+      - name: Preparar repositorio
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KS_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASS }}
+        run: |
+          set -e
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          mkdir -p repo_build/apk repo_build/icon
+          : > entries.ndjson
+
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/ks.jks"
+          else
+            echo "Sin llave propia: usando firma de depuración (solo para pruebas)"
+          fi
+
+          # Una función por extensión: carpeta | nombre visible | nombre del apk
+          build_ext() {
+            DIR="$1"; NAME="$2"; FILE="$3"
+            SRC=$(ls src/es/$DIR/build/outputs/apk/debug/*.apk | head -n 1)
+            APK="repo_build/apk/$FILE.apk"
+
+            if [ -n "$KS_B64" ]; then
+              "$BT/apksigner" sign --ks "$RUNNER_TEMP/ks.jks" \
+                --ks-pass env:KS_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
+                --out "$APK" "$SRC"
+            else
+              cp "$SRC" "$APK"
+            fi
+
+            INFO=$("$BT/aapt2" dump badging "$APK" | grep "^package:")
+            PKG=$(echo "$INFO" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+            CODE=$(echo "$INFO" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
+            VERSION=$(echo "$INFO" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+            FP=$("$BT/apksigner" verify --print-certs "$APK" | grep -m1 "SHA-256 digest" | awk '{print $NF}')
+            echo "$FP" > fp.txt
+
+            echo "$NAME: pkg=$PKG code=$CODE version=$VERSION fp=$FP"
+
+            jq -n --arg name "$NAME" --arg pkg "$PKG" --arg apk "$FILE.apk" \
+              --arg ver "$VERSION" --argjson code "$CODE" '{
+                name: $name,
+                pkg: $pkg,
+                apk: $apk,
+                lang: "es",
+                code: $code,
+                version: $ver,
+                nsfw: 1,
+                hasReadme: 0,
+                hasChangelog: 0,
+                sources: []
+              }' >> entries.ndjson
+
+            ICON="src/es/$DIR/res/mipmap-xxxhdpi/ic_launcher.png"
+            if [ -f "$ICON" ]; then cp "$ICON" "repo_build/icon/$PKG.png"; fi
+          }
+
+          build_ext manhwashot "ManhwaShot" manhwashot
+          build_ext kumanga    "KuManga"    kumanga
+
+          jq -s '.' entries.ndjson > repo_build/index.min.json
+
+          jq -n --arg fp "$(cat fp.txt)" '{
+            meta: {
+              name: "Repo de Bxnja",
+              shortName: "Bxnja Repo",
+              website: "https://github.com/benjaminmunozf01-byte/minho-bxnja",
+              signingKeyFingerprint: $fp
+            }
+          }' > repo_build/repo.json
+
+          cat repo_build/index.min.json
+
+      - name: Publicar en la rama 'repo'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: repo
+          publish_dir: ./repo_build
+          force_orphan: true
+          commit_message: "Actualizar repositorio y APK"
