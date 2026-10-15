@@ -1,0 +1,23 @@
+name: Compilar KuManga (prueba)
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar código
+        uses: actions/checkout@v4
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Compilar extensión
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :src:es:kumanga:assembleDebug
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KuManga-APK
+          path: "src/es/kumanga/build/outputs/apk/debug/*.apk"
