@@ -186,15 +186,27 @@ abstract class KuManga : KeiSource() {
     // ---------- Páginas del capítulo ----------
     override suspend fun getPageList(chapter: SChapter): List<Page> {
         val mangaId = Regex("""/manga/(\d+)""").find(chapter.url)?.groupValues?.get(1)
-        val referer = if (mangaId != null) "$baseUrl/manga/$mangaId" else "$baseUrl/"
-        var html = getHtml(baseUrl + chapter.url, referer)
-        if (!html.contains("const jaja") && mangaId != null) {
-            // Reintento: pasar primero por la ficha del manga (cookies/sesión)
-            getHtml(referer)
-            html = getHtml(baseUrl + chapter.url, referer)
+        val mangaPage = if (mangaId != null) "$baseUrl/manga/$mangaId" else "$baseUrl/"
+        val chapterUrl = baseUrl + chapter.url
+
+        // Paso 1: página intermedia del capítulo ("INICIAR LECTURA / VER CAPÍTULOS")
+        var html = getHtml(chapterUrl, mangaPage)
+
+        // Paso 2: si no es el lector, seguir el botón "Iniciar lectura" (/manga/leer/ID o /manga/c/ID)
+        if (!html.contains("const jaja")) {
+            val landing = parse(html, chapterUrl)
+            val readerUrl = landing.selectFirst("a#leer[href]")?.absUrl("href")
+                ?: landing.select("a[href]")
+                    .firstOrNull { it.text().contains("iniciar", true) && it.attr("href").contains(READER_REGEX) }
+                    ?.absUrl("href")
+                ?: landing.selectFirst("a[href*=/manga/leer/], a[href*=/manga/c/]")?.absUrl("href")
+                ?: READER_REGEX.find(html)?.value?.toAbsolute()
+                ?: throw Exception("No se encontró el botón 'Iniciar lectura' del capítulo. Ábrelo en WebView.")
+            html = getHtml(readerUrl, chapterUrl)
         }
+
         val encoded = Regex("""const\s+jaja\s*=\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
-            ?: throw Exception("No se pudo cargar el capítulo (el sitio redirigió al inicio). Ábrelo en WebView.")
+            ?: throw Exception("No se pudieron leer las imágenes del capítulo. Ábrelo en WebView.")
 
         val raw = Base64.decode(encoded, Base64.DEFAULT)
         val decoded = String(
@@ -230,7 +242,8 @@ abstract class KuManga : KeiSource() {
         else -> "$baseUrl/$this"
     }
 
-    companion object {
+   companion object {
         private const val KEY = "Jr54VwepF4La"
+        private val READER_REGEX = Regex("""/?manga/(?:leer|c)/\d+""")
     }
 }
