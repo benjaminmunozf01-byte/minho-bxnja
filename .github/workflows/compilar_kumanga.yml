@@ -15,6 +15,7 @@ jobs:
       - name: Compilar extensión
         run: |
           chmod +x ./gradlew
+          ./gradlew spotlessApply
           ./gradlew :src:es:kumanga:assembleDebug
       - name: Subir APK
         uses: actions/upload-artifact@v4
