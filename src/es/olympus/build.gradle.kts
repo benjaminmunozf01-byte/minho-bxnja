@@ -7,7 +7,7 @@ plugins {
 keiyoushi {
     // Nombre distinto para que no choque con la extensión "Olympus Scanlation" de tu otro repo.
     name = "Olympus"
-    versionCode = 3
+    versionCode = 4
     contentWarning = ContentWarning.SAFE
     libVersion = "1.6"
 
