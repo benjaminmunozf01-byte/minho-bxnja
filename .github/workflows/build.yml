@@ -28,8 +28,8 @@ jobs:
       - name: Compilar extensiones
         run: |
           chmod +x ./gradlew
-          ./gradlew :src:es:manhwashot:spotlessApply :src:es:olympus:spotlessApply
-          ./gradlew :src:es:manhwashot:assembleDebug :src:es:olympus:assembleDebug
+          ./gradlew :src:es:manhwashot:spotlessApply :src:es:kumanga:spotlessApply :src:es:olympus:spotlessApply
+          ./gradlew :src:es:manhwashot:assembleDebug :src:es:kumanga:assembleDebug :src:es:olympus:assembleDebug
 
       - name: Preparar repositorio
         env:
@@ -91,6 +91,7 @@ jobs:
           }
 
           build_ext manhwashot "ManhwaShot" manhwashot
+          build_ext kumanga    "KuManga"    kumanga
           build_ext olympus    "Olympus"    olympus
 
           jq -s '.' entries.ndjson > repo_build/index.min.json
