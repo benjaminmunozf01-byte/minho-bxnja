@@ -12,9 +12,8 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import keiyoushi.annotation.Source
-import keiyoushi.network.Fetch
-import keiyoushi.network.fetch
 import keiyoushi.network.get
+import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.getPreferences
@@ -28,12 +27,13 @@ import kotlinx.serialization.SerializationException
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Olympus Scanlation (propio)
  *
- * Basado en la versión oficial con la nueva API de red (Fetch.XHR / Fetch.DOCUMENT),
- * más los cambios necesarios para la web nueva de Olympus (oct-2026):
+ * Cambios necesarios para la web nueva de Olympus (oct-2026), sin la API Fetch
+ * (este repo usa una versión de keiyoushi.network que no la incluye):
  *  - El subdominio `panel.` ya no existe (HTTP 520). Todo va por el dominio principal.
  *  - Las páginas de un capítulo se piden por NOMBRE del capítulo:
  *    /api/capitulo/{slug}/{nombre}?type=comic  (antes: /api/capitulo/comic-{slug}/{id}).
@@ -50,10 +50,10 @@ abstract class OlympusScanlation :
         if (!preferences.fetchDomainPref()) return
         try {
             val initClient = network.client
-            val document = initClient.newCall(GET("https://olympus.pages.dev", headers).newBuilder().fetch(Fetch.DOCUMENT).build()).execute().asJsoup()
+            val document = initClient.newCall(GET("https://olympus.pages.dev", headers)).execute().asJsoup()
             val domain = document.selectFirst("meta[property=og:url]")?.attr("content")
                 ?: return
-            val host = initClient.newCall(GET(domain, headers).newBuilder().fetch(Fetch.DOCUMENT).build()).execute().request.url.host
+            val host = initClient.newCall(GET(domain, headers)).execute().request.url.host
             val newDomain = "https://$host"
             preferences.edit().putString(BASE_URL_PREF, newDomain).apply()
         } catch (_: Exception) {
@@ -65,7 +65,7 @@ abstract class OlympusScanlation :
 
     override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder {
         fetchedDomainUrl()
-        return this
+        return rateLimit(3, 2.seconds) { it.host == baseUrl.toHttpUrl().host }
     }
 
     // ---------------------------------------------------------------- slugs
@@ -88,7 +88,7 @@ abstract class OlympusScanlation :
         }
 
         // El parámetro cb evita que el CDN devuelva una lista con slugs viejos.
-        val series = client.get("$baseUrl/api/series/list?cb=$now", Fetch.XHR).parseAs<PayloadMangaDto>()
+        val series = client.get("$baseUrl/api/series/list?cb=$now").parseAs<PayloadMangaDto>()
 
         val comics = series.data.filter { it.type == "comic" }
 
@@ -130,7 +130,7 @@ abstract class OlympusScanlation :
 
     override suspend fun getPopularManga(page: Int): MangasPage {
         fetchSeriesList()
-        val result = client.get("$baseUrl/api/rankings?page=$page&period=total_ranking", Fetch.XHR).parseAs<RankingDto>()
+        val result = client.get("$baseUrl/api/rankings?page=$page&period=total_ranking").parseAs<RankingDto>()
         val slugMap = preferences.slugMap.toMutableMap()
         val mangaList = result.data
             .filter { it.type == "comic" }
@@ -144,7 +144,7 @@ abstract class OlympusScanlation :
 
     override suspend fun getLatestUpdates(page: Int): MangasPage {
         fetchSeriesList()
-        val result = client.get("$baseUrl/api/new-chapters?page=$page", Fetch.XHR).parseAs<NewChaptersDto>()
+        val result = client.get("$baseUrl/api/new-chapters?page=$page").parseAs<NewChaptersDto>()
         val slugMap = preferences.slugMap.toMutableMap()
         val mangaList = result.data.filter { it.type == "comic" }
             .map {
@@ -174,7 +174,7 @@ abstract class OlympusScanlation :
         if (url.host != baseUrl.toHttpUrl().host || url.pathSegments.firstOrNull() != "series") return null
         val series = url.pathSegments.getOrNull(1)?.takeIf { it.startsWith("comic-") } ?: return null
         val slug = series.removePrefix("comic-").takeIf(String::isNotBlank) ?: return null
-        val manga = client.get("$baseUrl/api/series/$slug?type=comic", Fetch.XHR).parseAs<MangaDetailDto>().data
+        val manga = client.get("$baseUrl/api/series/$slug?type=comic").parseAs<MangaDetailDto>().data
         preferences.slugMap = preferences.slugMap + (manga.id to manga.slug)
         return manga.toSMangaDetails()
     }
@@ -190,7 +190,7 @@ abstract class OlympusScanlation :
             coroutineScope {
                 val details = async {
                     if (fetchDetails) {
-                        client.get("$baseUrl/api/series/$slug?type=comic", Fetch.XHR)
+                        client.get("$baseUrl/api/series/$slug?type=comic")
                             .parseAs<MangaDetailDto>().data.toSMangaDetails()
                     } else {
                         manga
@@ -222,7 +222,7 @@ abstract class OlympusScanlation :
     }
 
     // El mismo dominio sirve la API (ya no existe el subdominio panel.).
-    private suspend fun fetchChapterPage(slug: String, page: Int): PayloadChapterDto = client.get("$baseUrl/api/series/$slug/chapters?page=$page&direction=desc&type=comic", Fetch.XHR)
+    private suspend fun fetchChapterPage(slug: String, page: Int): PayloadChapterDto = client.get("$baseUrl/api/series/$slug/chapters?page=$page&direction=desc&type=comic")
         .parseAs<PayloadChapterDto>()
 
     // ------------------------------------------------------------ capítulos
@@ -260,7 +260,7 @@ abstract class OlympusScanlation :
                 .build()
                 .toString()
 
-            val pages = client.get(url, Fetch.XHR).parseAs<PayloadPagesDto>().chapter.pages
+            val pages = client.get(url).parseAs<PayloadPagesDto>().chapter.pages
             if (pages.isEmpty()) throw Exception("El capítulo aún no tiene páginas.")
 
             pages.mapIndexed { i, img -> Page(i, imageUrl = absoluteUrl(img)) }
