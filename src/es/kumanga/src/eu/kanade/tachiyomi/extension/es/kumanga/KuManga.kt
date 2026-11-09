@@ -185,50 +185,338 @@ abstract class KuManga : KeiSource() {
 
         // Paso 1: página intermedia del capítulo ("INICIAR LECTURA / VER CAPÍTULOS")
         var html = getHtml(chapterUrl, mangaPage)
+        var doc = parse(html, chapterUrl)
+        var pages = extractPagesFromReader(doc)
 
         // Paso 2: si no es el lector, seguir el botón "Iniciar lectura" (/manga/leer/ID o /manga/c/ID)
-        if (!html.contains("const jaja") && !html.contains("const rpics")) {
-            val landing = parse(html, chapterUrl)
-            val readerUrl = landing.selectFirst("a#leer[href], a.readButton[href]")?.absUrl("href")
-                ?: landing.select("a[href]")
+        if (pages == null) {
+            val landingReferer = doc.selectFirst("meta[property=og:url]")?.attr("content")
+                ?.takeIf { it.isNotBlank() } ?: chapterUrl
+            val readerUrl = doc.selectFirst("a#leer[href], a.readButton[href]")?.absUrl("href")
+                ?: doc.select("a[href]")
                     .firstOrNull { it.text().contains("iniciar", true) && it.attr("href").contains(READER_REGEX) }
                     ?.absUrl("href")
-                ?: landing.selectFirst("a[href*=/manga/leer/], a[href*=/manga/c/]")?.absUrl("href")
+                ?: doc.selectFirst("a[href*=/manga/leer/], a[href*=/manga/c/]")?.absUrl("href")
                 ?: READER_REGEX.find(html)?.value?.toAbsolute()
                 ?: throw Exception("No se encontró el botón 'Iniciar lectura' del capítulo. Ábrelo en WebView.")
-            html = getHtml(readerUrl, chapterUrl)
-            if (!html.contains("const jaja") && !html.contains("const rpics") && readerUrl.contains("/manga/c/")) {
-                html = getHtml(readerUrl.replace("/manga/c/", "/manga/leer/"), readerUrl)
+            html = getHtml(readerUrl, landingReferer)
+            doc = parse(html, readerUrl)
+            pages = extractPagesFromReader(doc)
+            if (pages == null && readerUrl.contains("/manga/c/")) {
+                val leerUrl = readerUrl.replace("/manga/c/", "/manga/leer/")
+                html = getHtml(leerUrl, readerUrl)
+                doc = parse(html, leerUrl)
+                pages = extractPagesFromReader(doc)
             }
         }
 
-        val rpicsVar = RPICS_REGEX.find(html)?.groupValues?.get(1)
-        val encoded = (
-            if (rpicsVar != null) {
-                STRING_CONST_REGEX.findAll(html).firstOrNull { it.groupValues[1] == rpicsVar }?.groupValues?.get(2)
-            } else {
-                null
-            }
-            ) ?: JAJA_REGEX.find(html)?.groupValues?.get(1)
+        val rawPages = pages
             ?: throw Exception("No se pudieron leer las imágenes del capítulo. Ábrelo en WebView.")
 
-        val raw = Base64.decode(encoded, Base64.DEFAULT)
-        val decoded = String(
-            CharArray(raw.size) { i -> ((raw[i].toInt() and 0xFF) xor KEY[i % KEY.length].code).toChar() },
-        )
-        return json.parseToJsonElement(decoded).jsonArray.mapIndexed { i, e ->
-            Page(i, imageUrl = decodeSrc(e.jsonPrimitive.content))
+        return rawPages.mapIndexed { i, url ->
+            Page(i, imageUrl = decodeSrc(url))
         }
     }
 
+    // Extrae el arreglo de páginas evaluando únicamente asignaciones JS de nivel global (fuera de '{...}')
+    // previas a kx.reader.js, ignorando honeypots en scopes de bloque como '{const jaja2="...";const rpics=jaja2;}'.
+    private fun extractPagesFromReader(doc: Document): List<String>? {
+        val globals = mutableMapOf<String, String>()
+        for (script in doc.select("script")) {
+            if (script.parents().any { it.tagName().equals("template", true) || it.tagName().equals("noscript", true) }) {
+                continue
+            }
+            val src = script.attr("src")
+            if (src.contains("kx.reader", ignoreCase = true)) {
+                break
+            }
+            if (src.isNotEmpty()) {
+                continue
+            }
+            val type = script.attr("type").trim().lowercase()
+            if (type.isNotEmpty() && type != "text/javascript" && type != "application/javascript") {
+                continue
+            }
+            scanTopLevelBindings(script.data(), globals)
+        }
+        val encoded = globals["rpics"] ?: globals["jaja"] ?: return null
+        return decodeEncodedList(encoded)
+    }
+
+    private fun decodeEncodedList(encoded: String): List<String>? = runCatching {
+        val raw = Base64.decode(encoded, Base64.DEFAULT)
+        val decoded = ByteArray(raw.size) { i ->
+            (raw[i].toInt() xor KEY[i % KEY.length].code).toByte()
+        }.decodeToString()
+        json.parseToJsonElement(decoded).jsonArray
+            .map { it.jsonPrimitive.content }
+            .takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private sealed interface JsToken {
+        data class Ident(val name: String) : JsToken
+        data class Str(val value: String) : JsToken
+        data class Punct(val ch: Char) : JsToken
+        data object Other : JsToken
+    }
+
+    private fun scanTopLevelBindings(code: String, globals: MutableMap<String, String>) {
+        val tokens = mutableListOf<JsToken>()
+        val n = code.length
+        var i = 0
+        var braceDepth = 0
+        var parenDepth = 0
+        var canStartRegex = true
+
+        fun emit(tok: JsToken) {
+            if (braceDepth == 0 && parenDepth == 0) {
+                tokens.add(tok)
+            }
+        }
+
+        while (i < n) {
+            val c = code[i]
+            if (c == '\n') {
+                if (!canStartRegex) {
+                    emit(JsToken.Punct('\n'))
+                }
+                i++
+                continue
+            }
+            if (c.isWhitespace()) {
+                i++
+                continue
+            }
+            if (c == '/' && i + 1 < n && code[i + 1] == '/') {
+                i += 2
+                while (i < n && code[i] != '\n') {
+                    i++
+                }
+                continue
+            }
+            if (c == '/' && i + 1 < n && code[i + 1] == '*') {
+                i += 2
+                while (i + 1 < n && !(code[i] == '*' && code[i + 1] == '/')) {
+                    i++
+                }
+                i = (i + 2).coerceAtMost(n)
+                continue
+            }
+            if (c == '"' || c == '\'' || c == '`') {
+                val quote = c
+                i++
+                val sb = StringBuilder()
+                while (i < n && code[i] != quote) {
+                    val ch = code[i]
+                    if (ch == '\\' && i + 1 < n) {
+                        val nxt = code[i + 1]
+                        if (nxt == 'x' && i + 3 < n && code.substring(i + 2, i + 4).isHex()) {
+                            sb.append(code.substring(i + 2, i + 4).toInt(16).toChar())
+                            i += 4
+                            continue
+                        }
+                        if (nxt == 'u' && i + 5 < n && code.substring(i + 2, i + 6).isHex()) {
+                            sb.append(code.substring(i + 2, i + 6).toInt(16).toChar())
+                            i += 6
+                            continue
+                        }
+                        val escaped = when (nxt) {
+                            'n' -> '\n'
+                            'r' -> '\r'
+                            't' -> '\t'
+                            'b' -> '\b'
+                            'f' -> '\u000c'
+                            else -> nxt
+                        }
+                        sb.append(escaped)
+                        i += 2
+                    } else {
+                        sb.append(ch)
+                        i++
+                    }
+                }
+                if (i < n) {
+                    i++
+                }
+                emit(JsToken.Str(sb.toString()))
+                canStartRegex = false
+                continue
+            }
+            if (c == '/' && canStartRegex) {
+                i++
+                var inClass = false
+                while (i < n && code[i] != '\n') {
+                    val rc = code[i]
+                    if (rc == '\\' && i + 1 < n) {
+                        i += 2
+                        continue
+                    }
+                    when {
+                        rc == '[' -> inClass = true
+                        rc == ']' -> inClass = false
+                        rc == '/' && !inClass -> {
+                            i++
+                            while (i < n && code[i].isLetter()) {
+                                i++
+                            }
+                            break
+                        }
+                    }
+                    i++
+                }
+                emit(JsToken.Other)
+                canStartRegex = false
+                continue
+            }
+            if (c == '{') {
+                emit(JsToken.Punct(';'))
+                braceDepth++
+                canStartRegex = true
+                i++
+                continue
+            }
+            if (c == '}') {
+                braceDepth = (braceDepth - 1).coerceAtLeast(0)
+                emit(JsToken.Punct(';'))
+                canStartRegex = true
+                i++
+                continue
+            }
+            if (c == '(' || c == '[') {
+                emit(JsToken.Punct('('))
+                parenDepth++
+                canStartRegex = true
+                i++
+                continue
+            }
+            if (c == ')' || c == ']') {
+                parenDepth = (parenDepth - 1).coerceAtLeast(0)
+                emit(JsToken.Punct(')'))
+                canStartRegex = false
+                i++
+                continue
+            }
+            if (c.isLetter() || c == '_' || c == '$') {
+                val start = i
+                while (i < n && (code[i].isLetterOrDigit() || code[i] == '_' || code[i] == '$')) {
+                    i++
+                }
+                val ident = code.substring(start, i)
+                emit(JsToken.Ident(ident))
+                canStartRegex = ident in REGEX_KEYWORDS
+                continue
+            }
+            if (c.isDigit()) {
+                while (i < n && (code[i].isLetterOrDigit() || code[i] == '.' || code[i] == '_')) {
+                    i++
+                }
+                emit(JsToken.Other)
+                canStartRegex = false
+                continue
+            }
+            if (c == '=') {
+                val prevC = if (i > 0) code[i - 1] else '\u0000'
+                val nextC = if (i + 1 < n) code[i + 1] else '\u0000'
+                val isAssign = prevC !in "!<>=+-*/%&|^~?" && nextC != '=' && nextC != '>'
+                emit(if (isAssign) JsToken.Punct('=') else JsToken.Other)
+                canStartRegex = true
+                i++
+                continue
+            }
+            if (c == ';' || c == ',' || c == '+') {
+                val prevC = if (i > 0) code[i - 1] else '\u0000'
+                val nextC = if (i + 1 < n) code[i + 1] else '\u0000'
+                val isPlusOp = c == '+' && (prevC == '+' || nextC == '+' || nextC == '=')
+                emit(if (isPlusOp) JsToken.Other else JsToken.Punct(c))
+                canStartRegex = true
+                i++
+                continue
+            }
+            emit(JsToken.Other)
+            canStartRegex = true
+            i++
+        }
+
+        var idx = 0
+        var skipUntilSemi = false
+        while (idx < tokens.size) {
+            val tok = tokens[idx]
+            if (tok == JsToken.Punct(';')) {
+                skipUntilSemi = false
+                idx++
+                continue
+            }
+            if (skipUntilSemi) {
+                idx++
+                continue
+            }
+            if (tok is JsToken.Ident && tok.name in COND_KEYWORDS) {
+                skipUntilSemi = true
+                idx++
+                continue
+            }
+            if (tok is JsToken.Ident && idx + 1 < tokens.size && tokens[idx + 1] == JsToken.Punct('=')) {
+                val prev = tokens.getOrNull(idx - 1)
+                val validStart = prev == null ||
+                    prev == JsToken.Punct(';') ||
+                    prev == JsToken.Punct('\n') ||
+                    prev == JsToken.Punct(',') ||
+                    (prev is JsToken.Ident && prev.name in DECL_KEYWORDS)
+                if (validStart) {
+                    var j = idx + 2
+                    val rhsBuf = StringBuilder()
+                    var validRhs = false
+                    while (j < tokens.size) {
+                        when (val rhs = tokens[j]) {
+                            is JsToken.Str -> rhsBuf.append(rhs.value)
+                            is JsToken.Ident -> {
+                                val resolved = globals[rhs.name]
+                                if (resolved == null) {
+                                    validRhs = false
+                                    break
+                                }
+                                rhsBuf.append(resolved)
+                            }
+                            else -> {
+                                validRhs = false
+                                break
+                            }
+                        }
+                        validRhs = true
+                        if (j + 1 < tokens.size && tokens[j + 1] == JsToken.Punct('+')) {
+                            j += 2
+                            validRhs = false
+                            continue
+                        }
+                        j++
+                        break
+                    }
+                    val after = tokens.getOrNull(j)
+                    val validEnd = after == null ||
+                        after == JsToken.Punct(';') ||
+                        after == JsToken.Punct('\n') ||
+                        after == JsToken.Punct(',')
+                    if (validRhs && validEnd) {
+                        globals[tok.name] = rhsBuf.toString()
+                    }
+                    idx = maxOf(idx + 2, j)
+                    continue
+                }
+            }
+            idx++
+        }
+    }
+
+    private fun String.isHex(): Boolean = isNotEmpty() && all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+
     private fun decodeSrc(s: String): String {
-        val hex = s.substringAfter("src=", "")
-        if (hex.isEmpty() || hex.length % 2 != 0 || !hex.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
+        val hex = s.substringAfter("src=", "").substringBefore("&")
+        if (hex.isEmpty() || hex.length % 2 != 0 || !hex.isHex()) {
             return s.toAbsolute()
         }
-        val sb = StringBuilder(hex.length / 2)
-        for (i in hex.indices step 2) sb.append(hex.substring(i, i + 2).toInt(16).toChar())
-        return sb.toString()
+        return ByteArray(hex.length / 2) { i ->
+            hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+        }.decodeToString()
     }
 
     // ---------- Filtros ----------
@@ -249,8 +537,23 @@ abstract class KuManga : KeiSource() {
     companion object {
         private const val KEY = "Jr54VwepF4La"
         private val READER_REGEX = Regex("""/?manga/(?:leer|c)/\d+""")
-        private val RPICS_REGEX = Regex("""const\s+rpics\s*=\s*(\w+)\s*;""")
-        private val STRING_CONST_REGEX = Regex("""const\s+(\w+)\s*=\s*"([^"]*)"""")
-        private val JAJA_REGEX = Regex("""const\s+jaja\s*=\s*"([^"]+)"""")
+        private val DECL_KEYWORDS = setOf("const", "let", "var")
+        private val COND_KEYWORDS = setOf("if", "while", "for", "with")
+        private val REGEX_KEYWORDS = setOf(
+            "return",
+            "typeof",
+            "void",
+            "delete",
+            "throw",
+            "case",
+            "in",
+            "of",
+            "instanceof",
+            "new",
+            "yield",
+            "await",
+            "else",
+            "do",
+        )
     }
 }
